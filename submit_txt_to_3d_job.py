@@ -1,0 +1,126 @@
+# -*- coding: utf-8 -*-
+import argparse
+import json
+import os
+import time
+import urllib.request
+
+from tencentcloud.common.common_client import CommonClient
+from tencentcloud.common import credential
+from tencentcloud.common.exception.tencent_cloud_sdk_exception import TencentCloudSDKException
+from tencentcloud.common.profile.client_profile import ClientProfile
+from tencentcloud.common.profile.http_profile import HttpProfile
+
+from secrets import load_secrets
+
+
+def get_client():
+    s = load_secrets()
+    cred = credential.Credential(s.secret_id, s.secret_key)
+
+    http_profile = HttpProfile()
+    http_profile.endpoint = s.endpoint
+
+    client_profile = ClientProfile()
+    client_profile.httpProfile = http_profile
+
+    return CommonClient("hunyuan", "2023-09-01", cred, s.region, profile=client_profile)
+
+
+def submit_text_to_3d(prompt: str, face_count: int, generate_type: str) -> str:
+    client = get_client()
+    params = {"Prompt": prompt, "FaceCount": face_count, "GenerateType": generate_type}
+    result = client.call_json("SubmitHunyuanTo3DProJob", params)
+    job_id = result.get("Response", {}).get("JobId")
+    if not job_id:
+        raise RuntimeError(f"Submit failed: {json.dumps(result, indent=2)}")
+    return job_id
+
+
+def wait_for_completion(job_id: str, poll_seconds: int) -> list:
+    client = get_client()
+    params = {"JobId": job_id}
+
+    start_time = time.time()
+    while True:
+        result = client.call_json("QueryHunyuanTo3DProJob", params)
+        resp = result.get("Response", {})
+        status = resp.get("Status")
+
+        elapsed = int(time.time() - start_time)
+        mins, secs = divmod(elapsed, 60)
+        print(f"\rStatus: {status:<6} | Elapsed: {mins:02d}:{secs:02d}", end="", flush=True)
+
+        if status == "DONE":
+            print("\n✅ Job completed!")
+            return resp.get("ResultFile3Ds", []) or []
+        if status == "FAIL":
+            print("\n❌ Job failed!")
+            raise RuntimeError(f"{resp.get('ErrorCode')} - {resp.get('ErrorMessage')}")
+
+        time.sleep(poll_seconds)
+
+
+def download_file(url: str, output_path: str) -> None:
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    urllib.request.urlretrieve(url, output_path)
+
+
+def download_results(file_list: list, output_dir: str) -> list[str]:
+    os.makedirs(output_dir, exist_ok=True)
+    downloaded: list[str] = []
+    for i, file_info in enumerate(file_list):
+        if isinstance(file_info, dict):
+            url = file_info.get("Url") or file_info.get("FileUrl") or file_info.get("url") or ""
+        else:
+            url = str(file_info)
+        url = url.strip()
+        if not url:
+            continue
+
+        url_path = url.split("?")[0]
+        filename = os.path.basename(url_path) or f"model_{i+1}.glb"
+        out_path = os.path.join(output_dir, filename)
+        print(f"📥 Downloading {filename}...")
+        download_file(url, out_path)
+        downloaded.append(out_path)
+    return downloaded
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Submit a Text-to-3D job, wait for completion, and download results.")
+    parser.add_argument("--prompt", "-p", help="Text prompt. If omitted, you'll be prompted in the terminal.")
+    parser.add_argument("--faces", "-f", type=int, default=400000, help="Face count (default: 400000)")
+    parser.add_argument(
+        "--type",
+        "-t",
+        choices=["Normal", "LowPoly", "Geometry", "Sketch"],
+        default="Normal",
+        help="Generate type (default: Normal)",
+    )
+    parser.add_argument("--poll", type=int, default=10, help="Polling interval in seconds (default: 10)")
+    parser.add_argument("--output", "-o", default="./hunyuan_output_txt", help="Output directory (default: ./hunyuan_output_txt)")
+    args = parser.parse_args()
+
+    prompt = (args.prompt or "").strip()
+    if not prompt:
+        prompt = input("Enter prompt: ").strip()
+    if not prompt:
+        raise SystemExit("Prompt is required.")
+
+    try:
+        job_id = submit_text_to_3d(prompt=prompt, face_count=args.faces, generate_type=args.type)
+        print(f"✅ Submitted. JobId: {job_id}")
+        results = wait_for_completion(job_id, poll_seconds=args.poll)
+        downloaded = download_results(results, args.output)
+        print(f"✅ Downloaded {len(downloaded)} file(s) to: {os.path.abspath(args.output)}")
+        if downloaded:
+            print("Files:")
+            for p in downloaded:
+                print(f"  - {p}")
+    except TencentCloudSDKException as err:
+        raise SystemExit(f"API Error: {err}") from err
+
+
+if __name__ == "__main__":
+    main()
