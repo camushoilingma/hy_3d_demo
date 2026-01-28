@@ -18,12 +18,12 @@ pip install tencentcloud-sdk-python
 
 These scripts load your credentials from a **local JSON file** (so you don’t hardcode keys in source).
 
-### Option A (recommended): repo-local `secrets.json`
+**Secrets file lookup order (first found wins):**
+1. `$HY3D_SECRETS_PATH` (explicit path)
+2. `./secrets.json` (repo root, e.g. `$HOME/code/hy-3d/secrets.json`)
+3. `~/.hy-3d-secrets.json` (user-level)
 
-1. Create a new file at **the root of this repo**, e.g.:
-   - `$HOME/code/hy-3d/secrets.json`
-
-2. Paste this and fill in your values:
+Create **one** of those files with this content (fill in your values):
 
 ```json
 {
@@ -34,28 +34,8 @@ These scripts load your credentials from a **local JSON file** (so you don’t h
 }
 ```
 
-3. Confirm it’s being ignored by git:
-   - `.gitignore` contains `secrets.json` and `~/.hy-3d-secrets.json`
-
-### Option B: user-level secrets file
-
-Create this file instead:
-- `~/.hy-3d-secrets.json`
-
-Same JSON format as above.
-
-### Option C: specify a secrets path explicitly
-
-Set an environment variable:
-
-```bash
-export HY3D_SECRETS_PATH="/absolute/path/to/my-secrets.json"
-```
-
-The lookup order is:
-1. `$HY3D_SECRETS_PATH`
-2. `./secrets.json` (repo root)
-3. `~/.hy-3d-secrets.json`
+Confirm it’s being ignored by git:
+- `.gitignore` contains `secrets.json` and `~/.hy-3d-secrets.json`
 
 ## Usage
 
