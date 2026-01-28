@@ -20,8 +20,8 @@ These scripts load your credentials from a **local JSON file** (so you don’t h
 
 ### Option A (recommended): repo-local `secrets.json`
 
-1. Create a new file at:
-   - `/Users/camusma/code/hy-3d/secrets.json`
+1. Create a new file at **the root of this repo**, e.g.:
+   - `$HOME/code/hy-3d/secrets.json`
 
 2. Paste this and fill in your values:
 
