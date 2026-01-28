@@ -4,6 +4,7 @@ Small CLI scripts for Tencent Cloud **Hunyuan 3D**:
 - **Text → 3D**: submit a prompt, wait for completion, download model files
 - **Image (2D) → 3D**: submit an image, wait for completion, download model files
 - **Query**: query an existing JobId (optionally wait + download)
+- **Smart Topology**: submit an existing 3D model for topology optimization (Polygen 1.5)
 
 ## Prerequisites
 
@@ -72,6 +73,25 @@ Common options:
 python3 query_job.py <JOB_ID> --wait --download --output ./hunyuan_output_query
 ```
 
+### Smart Topology (3D model retopology)
+
+Submit a 3D model to Tencent Cloud Smart Topology (Polygen 1.5). You can use a public URL or a local file path.
+
+```bash
+# Remote URL
+python3 submit_smart_topology.py https://example.com/model.glb -f low
+
+# Local file
+python3 submit_smart_topology.py ./hunyuan_output/my_model.glb --local -f medium
+```
+
+Common options:
+- `-t, --file-type GLB|GLTF|OBJ|FBX|STL` (auto-detected if omitted)
+- `-p, --polygon-type triangle|quadrilateral`
+- `-f, --face-level high|medium|low`
+- `--json` to print raw JSON response
+- `--secrets /path/to/secrets.json` to override secrets path
+
 ## Output files and textures
 
 You’ll often see both:
@@ -87,6 +107,11 @@ If Blender shows missing textures (pink):
 - This repo currently targets **Hunyuan 3D** API actions:
   - `SubmitHunyuanTo3DProJob`
   - `QueryHunyuanTo3DProJob`
+  - `Submit3DSmartTopologyJob`
+
+- Example input assets are under:
+  - `text_prompts_images/2d_images/` – example 2D images for image → 3D
+  - `text_prompts_images/text_to_3d/` – example text prompts / assets for text → 3D
 
 If you want **Text → Image** generation, we can add a separate script once you confirm the exact Tencent API action name you’re using for text-to-image.
 
