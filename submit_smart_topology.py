@@ -19,10 +19,24 @@ import hmac
 import json
 import os
 import sys
+import time
+import urllib.request
 from datetime import datetime, timezone
 from typing import Dict, Optional
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError, URLError
+
+try:
+    from tencentcloud.common.common_client import CommonClient
+    from tencentcloud.common import credential
+    from tencentcloud.common.exception.tencent_cloud_sdk_exception import TencentCloudSDKException
+    from tencentcloud.common.profile.client_profile import ClientProfile
+    from tencentcloud.common.profile.http_profile import HttpProfile
+except ImportError:
+    print("❌ Tencent Cloud SDK not installed!")
+    print("   Run: pip install tencentcloud-sdk-python")
+    sys.exit(1)
+
 from secrets import Hy3DSecrets, load_secrets
 
 
@@ -180,6 +194,139 @@ def detect_file_type(url: str) -> str:
         return "GLB"  # Default
 
 
+def get_client():
+    """Create and return API client using SDK."""
+    s = load_secrets()
+    cred = credential.Credential(s.secret_id, s.secret_key)
+    
+    http_profile = HttpProfile()
+    http_profile.endpoint = s.endpoint
+    
+    client_profile = ClientProfile()
+    client_profile.httpProfile = http_profile
+    
+    return CommonClient("hunyuan", "2023-09-01", cred, s.region, profile=client_profile)
+
+
+def describe_smart_topology_job(job_id: str) -> dict:
+    """
+    Query a 3D Smart Topology job status using Describe3DSmartTopologyJob.
+    
+    Args:
+        job_id: The job ID returned by Submit3DSmartTopologyJob
+    
+    Returns:
+        API response as dict
+    """
+    client = get_client()
+    params = {"JobId": job_id}
+    return client.call_json("Describe3DSmartTopologyJob", params)
+
+
+def wait_for_completion(job_id: str, poll_seconds: int = 10) -> Optional[dict]:
+    """
+    Poll for job completion with progress display.
+    
+    Args:
+        job_id: The job ID to query
+        poll_seconds: Polling interval in seconds
+    
+    Returns:
+        Job response dict if successful, None if failed
+    """
+    print("\n⏱️  Waiting for topology optimization (this may take several minutes)...")
+    print("-" * 50)
+    
+    start_time = time.time()
+    poll_count = 0
+    
+    while True:
+        poll_count += 1
+        result = describe_smart_topology_job(job_id)
+        response = result.get("Response", {})
+        status = response.get("Status")
+        
+        elapsed = int(time.time() - start_time)
+        mins, secs = divmod(elapsed, 60)
+        
+        # Progress display
+        spinner = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"][poll_count % 10]
+        print(f"\r   {spinner} Status: {status:<6} | Elapsed: {mins:02d}:{secs:02d}", end="", flush=True)
+        
+        if status == "DONE":
+            print(f"\n\n🎉 SUCCESS! Topology optimization completed in {mins}m {secs}s")
+            return response
+            
+        elif status == "FAIL":
+            error_code = response.get("ErrorCode", "Unknown")
+            error_msg = response.get("ErrorMessage", "Unknown error")
+            print(f"\n\n❌ Optimization failed!")
+            print(f"   Error: {error_code} - {error_msg}")
+            return None
+            
+        else:  # WAIT or RUN
+            time.sleep(poll_seconds)
+
+
+def download_file(url: str, output_path: str) -> bool:
+    """Download a file from URL."""
+    try:
+        print(f"   Downloading {os.path.basename(output_path)}...", end=" ", flush=True)
+        urllib.request.urlretrieve(url, output_path)
+        size_mb = os.path.getsize(output_path) / (1024 * 1024)
+        print(f"✅ ({size_mb:.1f} MB)")
+        return True
+    except Exception as e:
+        print(f"❌ Failed: {e}")
+        return False
+
+
+def download_results(file_list: list, output_dir: str) -> list[str]:
+    """
+    Download all result files from the job response.
+    
+    Args:
+        file_list: List of file info dicts or URLs from ResultFile3Ds
+        output_dir: Directory to save files
+    
+    Returns:
+        List of downloaded file paths
+    """
+    print("\n📥 Downloading optimized 3D model files...")
+    print("-" * 50)
+    
+    os.makedirs(output_dir, exist_ok=True)
+    downloaded_files = []
+    
+    for i, file_info in enumerate(file_list):
+        # Handle different response formats
+        if isinstance(file_info, dict):
+            url = file_info.get("Url") or file_info.get("FileUrl") or file_info.get("url", "")
+            file_type = file_info.get("Type", file_info.get("type", ""))
+        else:
+            url = str(file_info)
+            file_type = ""
+        
+        if not url:
+            print(f"   ⚠️  Skipping empty URL for file #{i+1}")
+            continue
+        
+        # Extract filename from URL or generate one
+        url_path = url.split("?")[0]  # Remove query params
+        filename = os.path.basename(url_path)
+        
+        if not filename or filename == "":
+            ext = ".obj" if "obj" in url.lower() else ".glb"
+            filename = f"optimized_model_{i+1}{ext}"
+        
+        output_path = os.path.join(output_dir, filename)
+        
+        if download_file(url, output_path):
+            downloaded_files.append(output_path)
+    
+    return downloaded_files
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Submit a 3D model to Tencent Cloud Smart Topology API (Polygen 1.5)",
@@ -193,6 +340,10 @@ Examples:
   # Local file
   %(prog)s ./models/model.glb --local
   %(prog)s ./models/model.obj --local --file-type OBJ --face-level medium
+
+  # Wait for completion and download results
+  %(prog)s ./model.glb --wait --download --output ./optimized_models
+  %(prog)s https://example.com/model.glb --wait --poll 5 --download
         """,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -242,6 +393,31 @@ Examples:
         help="Treat file_ref as a local file path and upload content directly instead of using a URL",
     )
     
+    parser.add_argument(
+        "--wait",
+        action="store_true",
+        help="Wait until job is DONE/FAIL (polling for completion)",
+    )
+    
+    parser.add_argument(
+        "--poll",
+        type=int,
+        default=10,
+        help="Polling interval in seconds when --wait is used (default: 10)",
+    )
+    
+    parser.add_argument(
+        "--download",
+        action="store_true",
+        help="Download ResultFile3Ds once job is DONE (requires --wait)",
+    )
+    
+    parser.add_argument(
+        "--output", "-o",
+        default="./hunyuan_output",
+        help="Output directory for downloads (default: ./hunyuan_output)",
+    )
+    
     args = parser.parse_args()
     
     # Override secrets path if provided
@@ -287,9 +463,37 @@ Examples:
             if "Response" in response:
                 resp = response["Response"]
                 if "JobId" in resp:
+                    job_id = resp["JobId"]
                     print(f"Job submitted successfully!")
-                    print(f"  Job ID: {resp['JobId']}")
+                    print(f"  Job ID: {job_id}")
                     print(f"  Request ID: {resp.get('RequestId', 'N/A')}")
+                    
+                    # Wait for completion if requested
+                    if args.wait:
+                        job_response = wait_for_completion(job_id, poll_seconds=args.poll)
+                        
+                        if job_response and args.download:
+                            # Download results
+                            result_files = job_response.get("ResultFile3Ds", []) or []
+                            if result_files:
+                                downloaded = download_results(result_files, args.output)
+                                if downloaded:
+                                    print("\n" + "=" * 50)
+                                    print("  📦 DOWNLOAD COMPLETE")
+                                    print("=" * 50)
+                                    print(f"\n📁 Output directory: {os.path.abspath(args.output)}")
+                                    print(f"\n📄 Downloaded files:")
+                                    for f in downloaded:
+                                        size_mb = os.path.getsize(f) / (1024 * 1024)
+                                        print(f"   • {os.path.basename(f)} ({size_mb:.1f} MB)")
+                                    print("\n" + "-" * 50)
+                            else:
+                                print("\n⚠️  No result files found in job response")
+                        elif job_response is None:
+                            sys.exit(1)
+                    elif args.download:
+                        print("\n⚠️  --download requires --wait. Use --wait --download to download results.", file=sys.stderr)
+                        
                 elif "Error" in resp:
                     error = resp["Error"]
                     print(f"API Error: {error.get('Code', 'Unknown')}", file=sys.stderr)
@@ -301,6 +505,12 @@ Examples:
     except RuntimeError as e:
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
+    except TencentCloudSDKException as e:
+        print(f"API Error: {e}", file=sys.stderr)
+        sys.exit(1)
+    except KeyboardInterrupt:
+        print("\n\n👋 Cancelled by user")
+        sys.exit(0)
 
 
 if __name__ == "__main__":

@@ -69,28 +69,50 @@ Common options:
 
 ### Query a JobId (optional wait + download)
 
+Query an existing job by JobId. Supports both Hunyuan 3D generation jobs and Smart Topology jobs.
+
 ```bash
+# Query a text/image-to-3d job (default)
 python3 query_job.py <JOB_ID> --wait --download --output ./hunyuan_output_query
+
+# Query a Smart Topology job
+python3 query_job.py <JOB_ID> --type smart-topology --wait --download --output ./hunyuan_output_query
 ```
+
+Common options:
+- `--type hunyuan|smart-topology` (default: hunyuan) - Job type to query
+- `--wait` - Wait until job is DONE/FAIL
+- `--poll 10` - Polling interval in seconds (default: 10)
+- `--download` - Download ResultFile3Ds once DONE
+- `--output ./some_dir` - Output directory for downloads
 
 ### Smart Topology (3D model retopology)
 
-Submit a 3D model to Tencent Cloud Smart Topology (Polygen 1.5). You can use a public URL or a local file path.
+Submit a 3D model to Tencent Cloud Smart Topology (Polygen 1.5). You can use a public URL or a local file path. Optionally wait for completion and download results.
 
 ```bash
-# Remote URL
+# Remote URL (submit only)
 python3 submit_smart_topology.py https://example.com/model.glb -f low
 
-# Local file
+# Local file (submit only)
 python3 submit_smart_topology.py ./hunyuan_output/my_model.glb --local -f medium
+
+# Submit, wait for completion, and download results
+python3 submit_smart_topology.py ./model.glb --wait --download --output ./optimized_models
+python3 submit_smart_topology.py https://example.com/model.glb --wait --poll 5 --download
 ```
 
 Common options:
 - `-t, --file-type GLB|GLTF|OBJ|FBX|STL` (auto-detected if omitted)
 - `-p, --polygon-type triangle|quadrilateral`
 - `-f, --face-level high|medium|low`
-- `--json` to print raw JSON response
-- `--secrets /path/to/secrets.json` to override secrets path
+- `--local` - Treat file_ref as a local file path (uploads content directly)
+- `--wait` - Wait until job is DONE/FAIL (polling for completion)
+- `--poll 10` - Polling interval in seconds when --wait is used (default: 10)
+- `--download` - Download ResultFile3Ds once DONE (requires --wait)
+- `--output ./some_dir` - Output directory for downloads (default: ./hunyuan_output)
+- `--json` - Print raw JSON response
+- `--secrets /path/to/secrets.json` - Override secrets path
 
 ## Output files and textures
 
@@ -105,9 +127,10 @@ If Blender shows missing textures (pink):
 ## Notes
 
 - This repo currently targets **Hunyuan 3D** API actions:
-  - `SubmitHunyuanTo3DProJob`
-  - `QueryHunyuanTo3DProJob`
-  - `Submit3DSmartTopologyJob`
+  - `SubmitHunyuanTo3DProJob` - Submit text/image-to-3D generation jobs
+  - `QueryHunyuanTo3DProJob` - Query text/image-to-3D generation jobs
+  - `Submit3DSmartTopologyJob` - Submit 3D model topology optimization jobs
+  - `Describe3DSmartTopologyJob` - Query Smart Topology job status
 
 - Example input assets are under:
   - `text_prompts_images/2d_images/` – example 2D images for image → 3D

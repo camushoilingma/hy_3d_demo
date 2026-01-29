@@ -33,8 +33,25 @@ def download_file(url: str, output_path: str) -> None:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Query a Hunyuan 3D job; optionally wait and download results.")
+    parser = argparse.ArgumentParser(
+        description="Query a Hunyuan 3D job; optionally wait and download results.",
+        epilog="""
+Examples:
+  # Query a text/image-to-3d job (default)
+  %(prog)s <job_id> --wait --download
+
+  # Query a Smart Topology job
+  %(prog)s <job_id> --type smart-topology --wait --download
+        """,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     parser.add_argument("job_id", help="JobId to query")
+    parser.add_argument(
+        "--type", "-t",
+        choices=["hunyuan", "smart-topology"],
+        default="hunyuan",
+        help="Job type: 'hunyuan' for text/image-to-3d jobs (default), 'smart-topology' for topology optimization jobs"
+    )
     parser.add_argument("--wait", action="store_true", help="Wait until job is DONE/FAIL")
     parser.add_argument("--poll", type=int, default=10, help="Polling interval seconds (default: 10)")
     parser.add_argument("--download", action="store_true", help="Download ResultFile3Ds once DONE")
@@ -44,9 +61,15 @@ def main():
     client = get_client()
     params = {"JobId": args.job_id}
 
+    # Determine which API to use based on job type
+    if args.type == "smart-topology":
+        api_action = "Describe3DSmartTopologyJob"
+    else:
+        api_action = "QueryHunyuanTo3DProJob"
+
     try:
         while True:
-            result = client.call_json("QueryHunyuanTo3DProJob", params)
+            result = client.call_json(api_action, params)
             resp = result.get("Response", {})
             status = resp.get("Status")
             print(f"Status: {status}")
@@ -75,7 +98,9 @@ def main():
                 break
 
             if status == "FAIL":
-                raise SystemExit(f"Job failed: {resp.get('ErrorCode')} - {resp.get('ErrorMessage')}")
+                error_code = resp.get("ErrorCode") or resp.get("Error", {}).get("Code", "Unknown")
+                error_msg = resp.get("ErrorMessage") or resp.get("Error", {}).get("Message", "Unknown error")
+                raise SystemExit(f"Job failed: {error_code} - {error_msg}")
 
             if not args.wait:
                 break
