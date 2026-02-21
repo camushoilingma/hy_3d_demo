@@ -12,7 +12,6 @@ import base64
 import os
 import sys
 import time
-import urllib.request
 
 try:
     from tencentcloud.common.common_client import CommonClient
@@ -26,6 +25,8 @@ except ImportError:
     sys.exit(1)
 
 from secrets import load_secrets
+
+from download_utils import download_results
 
 
 def image_to_base64(image_path):
@@ -105,58 +106,6 @@ def wait_for_completion(job_id):
             
         else:  # WAIT or RUN
             time.sleep(5)
-
-
-def download_file(url, output_path):
-    """Download a file from URL"""
-    try:
-        print(f"   Downloading {os.path.basename(output_path)}...", end=" ", flush=True)
-        urllib.request.urlretrieve(url, output_path)
-        size_mb = os.path.getsize(output_path) / (1024 * 1024)
-        print(f"✅ ({size_mb:.1f} MB)")
-        return True
-    except Exception as e:
-        print(f"❌ Failed: {e}")
-        return False
-
-
-def download_results(file_list, output_dir):
-    """Download all result files"""
-    print("\n📥 Downloading 3D model files...")
-    print("-" * 50)
-    
-    # Create output directory
-    os.makedirs(output_dir, exist_ok=True)
-    
-    downloaded_files = []
-    
-    for i, file_info in enumerate(file_list):
-        # Handle different response formats
-        if isinstance(file_info, dict):
-            url = file_info.get("Url") or file_info.get("FileUrl") or file_info.get("url", "")
-            file_type = file_info.get("Type", file_info.get("type", ""))
-        else:
-            url = str(file_info)
-            file_type = ""
-        
-        if not url:
-            print(f"   ⚠️  Skipping empty URL for file #{i+1}")
-            continue
-        
-        # Extract filename from URL or generate one
-        url_path = url.split("?")[0]  # Remove query params
-        filename = os.path.basename(url_path)
-        
-        if not filename or filename == "":
-            ext = ".obj" if "obj" in url.lower() else ".glb"
-            filename = f"model_{i+1}{ext}"
-        
-        output_path = os.path.join(output_dir, filename)
-        
-        if download_file(url, output_path):
-            downloaded_files.append(output_path)
-    
-    return downloaded_files
 
 
 def print_summary(downloaded_files, output_dir):
@@ -258,12 +207,20 @@ Examples:
     
     # Validate input image
     if not os.path.exists(args.image):
-        print(f"\n❌ Image file not found: {args.image}")
+        print(f"\n❌ Image file not found: {args.image}", file=sys.stderr)
         sys.exit(1)
-    
+    allowed_ext = (".jpg", ".jpeg", ".png", ".webp")
+    if os.path.splitext(args.image)[1].lower() not in allowed_ext:
+        print(f"\n⚠️  Warning: API supports JPG, PNG, JPEG, WEBP. Your file may not be accepted.", file=sys.stderr)
+    try:
+        size_mb = os.path.getsize(args.image) / (1024 * 1024)
+        if size_mb > 6:
+            print(f"\n⚠️  Warning: Image is {size_mb:.1f} MB. API recommends ≤6 MB (encoding adds ~30%%).", file=sys.stderr)
+    except OSError:
+        pass
     # Validate face count
     if not 40000 <= args.faces <= 1500000:
-        print(f"\n❌ Face count must be between 40,000 and 1,500,000")
+        print(f"\n❌ Face count must be between 40,000 and 1,500,000 (Pro API limit). Got {args.faces}.", file=sys.stderr)
         sys.exit(1)
     
     # Build API parameters
@@ -316,8 +273,11 @@ Examples:
         if not results:
             sys.exit(1)
 
-        # Download results
-        downloaded = download_results(results, args.output)
+        # Download results (title from source image filename)
+        image_base_name = os.path.splitext(os.path.basename(args.image))[0]
+        print("\n📥 Downloading 3D model files...")
+        print("-" * 50)
+        downloaded = download_results(results, args.output, base_name=image_base_name)
 
         if downloaded:
             print_summary(downloaded, args.output)

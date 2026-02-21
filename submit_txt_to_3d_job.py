@@ -2,8 +2,8 @@
 import argparse
 import json
 import os
+import sys
 import time
-import urllib.request
 
 from tencentcloud.common.common_client import CommonClient
 from tencentcloud.common import credential
@@ -12,6 +12,8 @@ from tencentcloud.common.profile.client_profile import ClientProfile
 from tencentcloud.common.profile.http_profile import HttpProfile
 
 from secrets import load_secrets
+
+from download_utils import download_results
 
 
 def get_client():
@@ -61,36 +63,16 @@ def wait_for_completion(job_id: str, poll_seconds: int) -> list:
         time.sleep(poll_seconds)
 
 
-def download_file(url: str, output_path: str) -> None:
-    os.makedirs(os.path.dirname(output_path), exist_ok=True)
-    urllib.request.urlretrieve(url, output_path)
-
-
-def download_results(file_list: list, output_dir: str) -> list[str]:
-    os.makedirs(output_dir, exist_ok=True)
-    downloaded: list[str] = []
-    for i, file_info in enumerate(file_list):
-        if isinstance(file_info, dict):
-            url = file_info.get("Url") or file_info.get("FileUrl") or file_info.get("url") or ""
-        else:
-            url = str(file_info)
-        url = url.strip()
-        if not url:
-            continue
-
-        url_path = url.split("?")[0]
-        filename = os.path.basename(url_path) or f"model_{i+1}.glb"
-        out_path = os.path.join(output_dir, filename)
-        print(f"📥 Downloading {filename}...")
-        download_file(url, out_path)
-        downloaded.append(out_path)
-    return downloaded
-
-
 def main():
     parser = argparse.ArgumentParser(description="Submit a Text-to-3D job, wait for completion, and download results.")
     parser.add_argument("--prompt", "-p", help="Text prompt. If omitted, you'll be prompted in the terminal.")
-    parser.add_argument("--faces", "-f", type=int, default=400000, help="Face count (default: 400000)")
+    parser.add_argument(
+        "--faces",
+        "-f",
+        type=int,
+        default=400000,
+        help="Face count 40000–1500000 (default: 400000). Pro API minimum is 40000.",
+    )
     parser.add_argument(
         "--type",
         "-t",
@@ -102,17 +84,28 @@ def main():
     parser.add_argument("--output", "-o", default="./hunyuan_output_txt", help="Output directory (default: ./hunyuan_output_txt)")
     args = parser.parse_args()
 
+    # Pro API FaceCount must be 40000–1500000
+    if not 40000 <= args.faces <= 1500000:
+        print(
+            f"❌ --faces must be between 40,000 and 1,500,000 (Pro API limit). Got {args.faces}.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
     prompt = (args.prompt or "").strip()
     if not prompt:
         prompt = input("Enter prompt: ").strip()
     if not prompt:
-        raise SystemExit("Prompt is required.")
+        print("❌ Prompt is required.", file=sys.stderr)
+        sys.exit(1)
+    if len(prompt.encode("utf-8")) > 1024:
+        print("⚠️  Warning: Pro API supports up to 1024 UTF-8 characters; prompt may be truncated.", file=sys.stderr)
 
     try:
         job_id = submit_text_to_3d(prompt=prompt, face_count=args.faces, generate_type=args.type)
         print(f"✅ Submitted. JobId: {job_id}")
         results = wait_for_completion(job_id, poll_seconds=args.poll)
-        downloaded = download_results(results, args.output)
+        downloaded = download_results(results, args.output, base_name=prompt)
         print(f"✅ Downloaded {len(downloaded)} file(s) to: {os.path.abspath(args.output)}")
         if downloaded:
             print("Files:")

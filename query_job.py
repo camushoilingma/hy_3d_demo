@@ -2,6 +2,7 @@
 import argparse
 import json
 import os
+import sys
 import time
 import urllib.request
 
@@ -42,15 +43,20 @@ Examples:
 
   # Query a Smart Topology job
   %(prog)s <job_id> --type smart-topology --wait --download
+
+  # Query a Texture Edit / Part / Rapid job
+  %(prog)s <job_id> --type texture-edit --wait --download
+  %(prog)s <job_id> --type part --wait --download
+  %(prog)s <job_id> --type rapid --wait --download
         """,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("job_id", help="JobId to query")
     parser.add_argument(
         "--type", "-t",
-        choices=["hunyuan", "smart-topology"],
+        choices=["hunyuan", "smart-topology", "texture-edit", "part", "rapid"],
         default="hunyuan",
-        help="Job type: 'hunyuan' for text/image-to-3d jobs (default), 'smart-topology' for topology optimization jobs"
+        help="Job type: hunyuan (default), smart-topology, texture-edit, part, or rapid"
     )
     parser.add_argument("--wait", action="store_true", help="Wait until job is DONE/FAIL")
     parser.add_argument("--poll", type=int, default=10, help="Polling interval seconds (default: 10)")
@@ -58,12 +64,25 @@ Examples:
     parser.add_argument("--output", "-o", default="./hunyuan_output_query", help="Output directory for downloads")
     args = parser.parse_args()
 
+    job_id = (args.job_id or "").strip()
+    if not job_id:
+        print("❌ job_id is required.", file=sys.stderr)
+        sys.exit(1)
+    if not job_id.replace("-", "").replace("_", "").isalnum():
+        print("⚠️  Warning: JobId usually looks like a numeric string (e.g. 1375367755519696896). Check if correct.", file=sys.stderr)
+
     client = get_client()
-    params = {"JobId": args.job_id}
+    params = {"JobId": job_id}
 
     # Determine which API to use based on job type
     if args.type == "smart-topology":
         api_action = "Describe3DSmartTopologyJob"
+    elif args.type == "texture-edit":
+        api_action = "QueryHunyuanTo3DTextureEditJob"
+    elif args.type == "part":
+        api_action = "QueryHunyuan3DPartJob"
+    elif args.type == "rapid":
+        api_action = "QueryHunyuanTo3DRapidJob"
     else:
         api_action = "QueryHunyuanTo3DProJob"
 

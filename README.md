@@ -1,140 +1,197 @@
 # hy-3d
 
-Small CLI scripts for Tencent Cloud **Hunyuan 3D**:
-- **Text → 3D**: submit a prompt, wait for completion, download model files
-- **Image (2D) → 3D**: submit an image, wait for completion, download model files
-- **Query**: query an existing JobId (optionally wait + download)
-- **Smart Topology**: submit an existing 3D model for topology optimization (Polygen 1.5)
+CLI scripts for Tencent Cloud **Hunyuan 3D** APIs: text/image → 3D, topology, part generation, texture edit, format conversion, and job query.
 
-## Prerequisites
+---
 
-- Python 3
-- Tencent Cloud SDK:
+## Requirements
+
+| Requirement | Notes |
+|-------------|--------|
+| **Python 3** | 3.8+ recommended |
+| **tencentcloud-sdk-python** | Required for all scripts: `pip install tencentcloud-sdk-python` |
+| **cos-python-sdk-v5** | Optional. Only needed when using **local files** with `convert_3d_format.py`, `submit_part_3d_job.py`, or `submit_texture_edit_job.py` (upload to Tencent COS). |
+
+Create a virtual environment (recommended):
 
 ```bash
+python3 -m venv .venv
+source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install tencentcloud-sdk-python
+# Optional, for local-file uploads:
+pip install cos-python-sdk-v5
 ```
 
-## Secrets / credentials setup (required)
+---
 
-These scripts load your credentials from a **local JSON file** (so you don’t hardcode keys in source).
+## Implemented APIs
 
-**Secrets file lookup order (first found wins):**
-1. `$HY3D_SECRETS_PATH` (explicit path)
-2. `./secrets.json` (repo root, e.g. `$HOME/code/hy-3d/secrets.json`)
-3. `~/.hy-3d-secrets.json` (user-level)
+| API | Script | What it does | Input requirements |
+|-----|--------|---------------|--------------------|
+| **SubmitHunyuanTo3DProJob** | `submit_txt_to_3d_job.py` | Text → 3D (Pro) | Prompt ≤1024 chars; faces 40k–1.5M |
+| **QueryHunyuanTo3DProJob** | (same + `query_job.py`) | Query Pro job | JobId |
+| **SubmitHunyuanTo3DProJob** | `submit_2d_to_3d.py` | Image → 3D (Pro) | Image JPG/PNG/JPEG/WEBP, ≤6 MB; faces 40k–1.5M |
+| **SubmitHunyuanTo3DRapidJob** | `submit_rapid_3d_job.py` | Text or image → 3D (Rapid) | Prompt ≤200 chars or image; output format OBJ/GLB/STL/USDZ/FBX/MP4/GIF |
+| **QueryHunyuanTo3DRapidJob** | (same) | Query Rapid job | JobId (use `query_job.py` with type for download) |
+| **SubmitHunyuan3DPartJob** | `submit_part_3d_job.py` | 3D → component parts | **FBX only**, ≤30k faces, ≤100 MB; URL or local (COS) |
+| **QueryHunyuan3DPartJob** | (same) | Query Part job | JobId |
+| **Submit3DSmartTopologyJob** | `submit_smart_topology.py` | 3D retopology (Polygen 1.5) | URL or local; GLB/GLTF/OBJ/FBX/STL |
+| **Describe3DSmartTopologyJob** | (same + `query_job.py`) | Query Smart Topology job | JobId |
+| **SubmitHunyuanTo3DTextureEditJob** | `submit_texture_edit_job.py` | Redraw FBX texture from prompt or image | FBX model <100k faces; prompt **or** reference image |
+| **QueryHunyuanTo3DTextureEditJob** | (same + `query_job.py`) | Query Texture Edit job | JobId |
+| **Convert3DFormat** | `convert_3d_format.py` | Convert 3D format | Input: FBX/OBJ/GLB, max 60 MB. Output: STL/USDZ/FBX/MP4/GIF |
+| **Query (any)** | `query_job.py` | Query by JobId, optional wait + download | JobId; `--type hunyuan\|smart-topology\|texture-edit\|part\|rapid` |
 
-Create **one** of those files with this content (fill in your values):
+All scripts validate inputs where possible and print **warnings** (e.g. wrong format, size) or **errors** (e.g. missing file, invalid range) before calling the API.
+
+---
+
+## Secrets (required)
+
+Secrets file **location** (first found wins):
+
+1. `$HY3D_SECRETS_PATH`
+2. `./secrets.json`
+3. `~/.hy-3d-secrets.json`
+
+**Contents:**
 
 ```json
 {
   "secret_id": "YOUR_SECRET_ID",
   "secret_key": "YOUR_SECRET_KEY",
   "region": "ap-singapore",
-  "endpoint": "hunyuan.intl.tencentcloudapi.com"
+  "endpoint": "hunyuan.intl.tencentcloudapi.com",
+  "cos_bucket": "your-bucket-appid",
+  "cos_region": "ap-singapore"
 }
 ```
 
-Confirm it’s being ignored by git:
-- `.gitignore` contains `secrets.json` and `~/.hy-3d-secrets.json`
+- `cos_bucket` and `cos_region` are **optional**; needed only when scripts upload **local** files (e.g. Part job, Texture Edit, Convert) to Tencent COS.
+
+---
+
+## Input and output layout
+
+Scripts use a simple layout so inputs and outputs stay organised:
+
+| Path | Purpose |
+|------|---------|
+| **`input/images/`** | 2D images for Image→3D (Pro, Rapid) and texture reference (Texture Edit). JPG, PNG, WEBP. Example files: `bose.png`, `chair_selency.webp`, `electro-box.png`, `table-selency.webp`. |
+| **`input/models/`** | 3D models for Part job (FBX), Smart Topology, Texture Edit, Convert. GLB, OBJ, FBX, etc. |
+| **`input/prompts/`** | Example text prompts for Text→3D. e.g. `leopard_airpods.txt`. Use: `--prompt "$(cat input/prompts/leopard_airpods.txt)"`. |
+| **`output/`** | All script outputs. Subdirs: `pro/`, `rapid/`, `part/`, `smart_topology/`, `texture_edit/`, `convert/`, `query/`, `test/`. |
+
+- **Input:** Put your images and 3D files in `input/images/` and `input/models/` (see [input/README.md](input/README.md)). Scripts also accept paths anywhere.
+- **Output:** Scripts default to their own dirs (e.g. `./hunyuan_output_txt`); you can pass `-o output/pro` etc. The **test script** writes under `output/test/<api>/`.
+- The `output/` directory is in `.gitignore`.
+
+---
+
+## Running the API tests
+
+A single script runs each API endpoint (submit → wait → download where applicable). Use your venv so the Tencent SDK is available:
+
+```bash
+source .venv/bin/activate   # if you use a venv
+# List which APIs have required input present
+python3 test_apis.py --list
+
+# Run all tests that have input (Pro, Rapid; Part/Smart Topology/Texture Edit/Convert if files in input/models/)
+python3 test_apis.py
+
+# Run one API only
+python3 test_apis.py --api pro
+python3 test_apis.py --api rapid
+python3 test_apis.py --api part        # needs input/models/*.fbx
+python3 test_apis.py --api smart-topology  # needs input/models/*.glb etc.
+python3 test_apis.py --api texture-edit    # needs input/models/*.fbx
+python3 test_apis.py --api convert         # needs input/models/*.glb or .obj or .fbx
+python3 test_apis.py --api query --job-id <JOB_ID>
+```
+
+- **Pro** and **Rapid** need no files (they use a test prompt). **Part**, **Smart Topology**, **Texture Edit**, and **Convert** need files in `input/models/`; if missing, they are skipped when you run `--api all`.
+- Results are written to **`output/test/<api>/`**. When you run `--api all`, the script also runs a **Query** test using the JobId from the Pro job.
+- Polling interval: `--poll 10` (default).
+
+---
 
 ## Usage
 
-### Text → 3D (submit + wait + download)
+### Text → 3D (Pro)
 
 ```bash
-python3 submit_txt_to_3d_job.py --prompt "a cute cartoon cat" --output ./hunyuan_output_txt
+python3 submit_txt_to_3d_job.py --prompt "a cute cartoon cat" -o output/pro
 ```
 
-If you omit `--prompt`, the script will ask interactively.
+Options: `--faces 400000`, `--type Normal|LowPoly|Geometry|Sketch`, `--poll 10`.
 
-Common options:
-- `--faces 400000` (default: 400000)
-- `--type Normal|LowPoly|Geometry|Sketch` (default: Normal)
-- `--poll 10` (polling interval seconds)
-- `--output ./some_dir`
-
-### Image (2D) → 3D (submit + wait + download)
+### Image → 3D (Pro)
 
 ```bash
-python3 submit_2d_to_3d.py ./photo.png --output ./hunyuan_output_img
+python3 submit_2d_to_3d.py input/images/photo.png -o output/pro
 ```
 
-Common options:
-- `--faces 400000`
-- `--type Normal|LowPoly|Geometry|Sketch`
-- `--pbr` (enable PBR materials)
-- `--polygon triangle|quad` (for LowPoly)
-- `--left / --right / --back` (optional multi-view images)
+Options: `--faces`, `--type`, `--pbr`, `--polygon triangle|quad`, `--left/--right/--back`.
 
-### Query a JobId (optional wait + download)
-
-Query an existing job by JobId. Supports both Hunyuan 3D generation jobs and Smart Topology jobs.
+### Text or Image → 3D (Rapid, optional output format)
 
 ```bash
-# Query a text/image-to-3d job (default)
-python3 query_job.py <JOB_ID> --wait --download --output ./hunyuan_output_query
-
-# Query a Smart Topology job
-python3 query_job.py <JOB_ID> --type smart-topology --wait --download --output ./hunyuan_output_query
+python3 submit_rapid_3d_job.py --prompt "a wooden chair" --format FBX -o output/rapid
+python3 submit_rapid_3d_job.py --image input/images/photo.png --format GLB -o output/rapid
 ```
 
-Common options:
-- `--type hunyuan|smart-topology` (default: hunyuan) - Job type to query
-- `--wait` - Wait until job is DONE/FAIL
-- `--poll 10` - Polling interval in seconds (default: 10)
-- `--download` - Download ResultFile3Ds once DONE
-- `--output ./some_dir` - Output directory for downloads
+Options: `--format OBJ|GLB|STL|USDZ|FBX|MP4|GIF`, `--pbr`, `--geometry`.
 
-### Smart Topology (3D model retopology)
-
-Submit a 3D model to Tencent Cloud Smart Topology (Polygen 1.5). You can use a public URL or a local file path. Optionally wait for completion and download results.
+### 3D Part (component generation, FBX only)
 
 ```bash
-# Remote URL (submit only)
+python3 submit_part_3d_job.py --url "https://example.com/model.fbx" -o output/part
+python3 submit_part_3d_job.py --file input/models/model.fbx -o output/part   # requires cos_bucket in secrets
+```
+
+### Smart Topology (retopology)
+
+```bash
 python3 submit_smart_topology.py https://example.com/model.glb -f low
-
-# Local file (submit only)
-python3 submit_smart_topology.py ./hunyuan_output/my_model.glb --local -f medium
-
-# Submit, wait for completion, and download results
-python3 submit_smart_topology.py ./model.glb --wait --download --output ./optimized_models
-python3 submit_smart_topology.py https://example.com/model.glb --wait --poll 5 --download
+python3 submit_smart_topology.py input/models/model.glb --local --wait --download -o output/smart_topology
 ```
 
-Common options:
-- `-t, --file-type GLB|GLTF|OBJ|FBX|STL` (auto-detected if omitted)
-- `-p, --polygon-type triangle|quadrilateral`
-- `-f, --face-level high|medium|low`
-- `--local` - Treat file_ref as a local file path (uploads content directly)
-- `--wait` - Wait until job is DONE/FAIL (polling for completion)
-- `--poll 10` - Polling interval in seconds when --wait is used (default: 10)
-- `--download` - Download ResultFile3Ds once DONE (requires --wait)
-- `--output ./some_dir` - Output directory for downloads (default: ./hunyuan_output)
-- `--json` - Print raw JSON response
-- `--secrets /path/to/secrets.json` - Override secrets path
+Options: `-t GLB|GLTF|OBJ|FBX|STL`, `-p triangle|quadrilateral`, `-f high|medium|low`, `--wait`, `--download`.
 
-## Output files and textures
+### Texture Edit (redraw FBX texture)
 
-You’ll often see both:
-- `*.glb` (glTF binary): usually easiest to import into Blender (often includes materials/textures)
-- `*.zip`: may contain additional formats + texture images
+```bash
+python3 submit_texture_edit_job.py input/models/model.fbx --prompt "wooden material" -o output/texture_edit
+python3 submit_texture_edit_job.py "https://example.com/model.fbx" --image input/images/ref.png -o output/texture_edit
+```
 
-If Blender shows missing textures (pink):
-- Blender → **File → External Data → Find Missing Files…**
-- Select the folder where you extracted the `.zip` contents.
+### Convert 3D format
 
-## Notes
+```bash
+python3 convert_3d_format.py "https://example.com/model.glb" --format STL
+python3 convert_3d_format.py input/models/model.glb -f FBX -o output/convert
+```
 
-- This repo currently targets **Hunyuan 3D** API actions:
-  - `SubmitHunyuanTo3DProJob` - Submit text/image-to-3D generation jobs
-  - `QueryHunyuanTo3DProJob` - Query text/image-to-3D generation jobs
-  - `Submit3DSmartTopologyJob` - Submit 3D model topology optimization jobs
-  - `Describe3DSmartTopologyJob` - Query Smart Topology job status
+### Query any job
 
-- Example input assets are under:
-  - `text_prompts_images/2d_images/` – example 2D images for image → 3D
-  - `text_prompts_images/text_to_3d/` – example text prompts / assets for text → 3D
+```bash
+python3 query_job.py <JOB_ID> --wait --download -o output/query
+python3 query_job.py <JOB_ID> --type smart-topology --wait --download -o output/query
+python3 query_job.py <JOB_ID> --type texture-edit --wait --download -o output/query
+```
 
-If you want **Text → Image** generation, we can add a separate script once you confirm the exact Tencent API action name you’re using for text-to-image.
+---
 
+## Output files
+
+- **Pro / Rapid / Smart Topology:** usually `.glb` (and sometimes `.zip` with textures).
+- **Part / Texture Edit / Convert:** depends on task (e.g. FBX, OBJ, STL).
+
+If Blender shows missing textures: **File → External Data → Find Missing Files…** and point to the folder with extracted assets.
+
+---
+
+## API coverage
+
+For a list of **implemented vs remaining** Hunyuan APIs, see [API_COVERAGE.md](API_COVERAGE.md). Not yet implemented in this repo: UV job (Submit/Describe HunyuanTo3DUVJob), ChatCompletions, ChatTranslations.

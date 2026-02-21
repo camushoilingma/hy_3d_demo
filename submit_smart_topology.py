@@ -430,15 +430,24 @@ Examples:
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
     
-    # Detect file type if not specified
-    file_type = args.file_type or detect_file_type(args.file_ref)
+    # Validate file_ref
+    file_ref = (args.file_ref or "").strip()
+    if not file_ref:
+        print("❌ file_ref (3D model URL or path) is required.", file=sys.stderr)
+        sys.exit(1)
+    if args.local and not os.path.exists(file_ref):
+        print(f"❌ Local file not found: {file_ref}", file=sys.stderr)
+        sys.exit(1)
+    is_local = args.local or os.path.exists(file_ref)
+    if not is_local and not (file_ref.startswith("http://") or file_ref.startswith("https://")):
+        print("⚠️  Warning: file_ref does not look like a URL (http(s)://). Remote requests may fail.", file=sys.stderr)
 
-    # If --local not set but path exists locally, assume local for convenience
-    is_local = args.local or os.path.exists(args.file_ref)
+    # Detect file type if not specified
+    file_type = args.file_type or detect_file_type(file_ref)
     
     if not args.json:
         print(f"Submitting job...")
-        print(f"  Source: {args.file_ref}")
+        print(f"  Source: {file_ref}")
         print(f"  Mode: {'local file' if is_local else 'remote URL'}")
         print(f"  File type: {file_type}")
         if args.polygon_type:
@@ -450,7 +459,7 @@ Examples:
     try:
         response = submit_smart_topology_job(
             secrets=secrets,
-            file_ref=args.file_ref,
+            file_ref=file_ref,
             file_type=file_type,
             polygon_type=args.polygon_type,
             face_level=args.face_level,

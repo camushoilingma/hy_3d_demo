@@ -10,6 +10,8 @@ class Hy3DSecrets:
     secret_key: str
     region: str = "ap-singapore"
     endpoint: str = "hunyuan.intl.tencentcloudapi.com"
+    cos_bucket: str | None = None  # e.g. "mybucket-1234567890" for local-file upload to COS
+    cos_region: str | None = None  # COS region, defaults to region if not set
 
 
 def _default_secrets_paths() -> list[Path]:
@@ -52,7 +54,16 @@ def load_secrets() -> Hy3DSecrets:
 
                 if not secret_id or not secret_key:
                     raise ValueError(f"Missing secret_id/secret_key in {p}")
-                return Hy3DSecrets(secret_id=secret_id, secret_key=secret_key, region=region, endpoint=endpoint)
+                cos_bucket = (data.get("cos_bucket") or "").strip() or None
+                cos_region = (data.get("cos_region") or "").strip() or None
+                return Hy3DSecrets(
+                    secret_id=secret_id,
+                    secret_key=secret_key,
+                    region=region,
+                    endpoint=endpoint,
+                    cos_bucket=cos_bucket,
+                    cos_region=cos_region,
+                )
         except json.JSONDecodeError as e:
             raise RuntimeError(f"Failed to parse secrets JSON in {p}: {e}") from e
 
@@ -65,7 +76,9 @@ def load_secrets() -> Hy3DSecrets:
         '  "secret_id": "YOUR_SECRET_ID",\n'
         '  "secret_key": "YOUR_SECRET_KEY",\n'
         '  "region": "ap-singapore",\n'
-        '  "endpoint": "hunyuan.intl.tencentcloudapi.com"\n'
+        '  "endpoint": "hunyuan.intl.tencentcloudapi.com",\n'
+        '  "cos_bucket": "your-bucket-appid",\n'
+        '  "cos_region": "ap-singapore"\n'
         '}\n'
     )
 
