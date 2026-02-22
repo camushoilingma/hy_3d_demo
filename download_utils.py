@@ -8,6 +8,7 @@ Exported files are named from the generating prompt or source filename when base
 import os
 import re
 import urllib.request
+from typing import Dict, List, Optional
 
 
 def sanitize_base_name(s: str, max_length: int = 120) -> str:
@@ -61,16 +62,16 @@ def _ext_from_url(url: str, default: str = ".glb") -> str:
 def download_results(
     file_list: list,
     output_dir: str,
-    base_name: str | None = None,
-) -> list[str]:
+    base_name: Optional[str] = None,
+) -> List[str]:
     """
     Download result files (ResultFile3Ds) into output_dir.
     If base_name is set, name files: base_name.ext, base_name_2.ext, ... (sanitized).
     Otherwise use filename from URL as before.
     """
     os.makedirs(output_dir, exist_ok=True)
-    downloaded: list[str] = []
-    used_names: dict[str, int] = {}  # base no ext -> count for _2, _3
+    downloaded: List[str] = []
+    used_names: Dict[str, int] = {}  # base no ext -> count for _2, _3
 
     for i, file_info in enumerate(file_list):
         if isinstance(file_info, dict):

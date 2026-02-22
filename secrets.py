@@ -2,6 +2,7 @@ import json
 import os
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Optional
 
 
 @dataclass(frozen=True)
@@ -10,8 +11,8 @@ class Hy3DSecrets:
     secret_key: str
     region: str = "ap-singapore"
     endpoint: str = "hunyuan.intl.tencentcloudapi.com"
-    cos_bucket: str | None = None  # e.g. "mybucket-1234567890" for local-file upload to COS
-    cos_region: str | None = None  # COS region, defaults to region if not set
+    cos_bucket: Optional[str] = None  # e.g. "mybucket-1234567890" for local-file upload to COS
+    cos_region: Optional[str] = None  # COS region, defaults to region if not set
 
 
 def _default_secrets_paths() -> list[Path]:
